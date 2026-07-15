@@ -138,52 +138,85 @@ function monthKey(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padSta
 document.getElementById("fileInput").addEventListener("change", e=>{
   const file = e.target.files[0];
   if(!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
+  readFileRobust(file);
+});
+
+// Some mobile browsers / older webviews throw "Array buffer allocation failed"
+// when reading via readAsArrayBuffer. Fall back to readAsBinaryString, which
+// uses a different code path and works around that issue.
+function readFileRobust(file){
+  const readerAB = new FileReader();
+  readerAB.onload = ev => {
     try{
       const wb = XLSX.read(ev.target.result, {type:"array", cellDates:true});
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
-      const dataRows = aoa.slice(2);
-      const parsed = [];
-      let minD=null, maxD=null;
-      for(const r of dataRows){
-        const instructor = r[COL.instructor];
-        const rawDate = r[COL.date];
-        if(!instructor || !rawDate) continue;
-        const d = toDateOnly(rawDate);
-        if(!d) continue;
-        if(!minD || d<minD) minD=d;
-        if(!maxD || d>maxD) maxD=d;
-        parsed.push({date:d, course:r[COL.course], instructor:String(instructor).trim(), rating:toNumericRating(r[COL.rating])});
-      }
-      if(parsed.length===0) throw new Error("No usable rows found. Check this is the raw feedback export.");
-      rawRows = parsed; fileRange = {min:minD, max:maxD};
-      document.getElementById("errorMsg").style.display="none";
-      document.getElementById("uploadPanel").innerHTML = `
-        <div class="file-row">
-          <div>
-            <div class="name">📄 ${file.name}</div>
-            <div class="meta">${parsed.length.toLocaleString()} rows &middot; data spans ${fmt(minD)} to ${fmt(maxD)}</div>
-          </div>
-          <button class="reset" onclick="location.reload()">Choose a different file</button>
-        </div>`;
-      document.getElementById("controlsPanel").style.display="block";
-      ["startDate","endDate"].forEach(id=>{
-        document.getElementById(id).min = fmt(minD);
-        document.getElementById(id).max = fmt(maxD);
-      });
-      document.getElementById("startDate").value = fmt(minD);
-      document.getElementById("endDate").value = fmt(maxD);
-      compute();
+      finishParse(wb, file);
     }catch(err){
-      document.getElementById("errorMsg").textContent = err.message || "Could not read this file.";
-      document.getElementById("errorMsg").style.display="block";
+      readFileBinaryFallback(file);
     }
   };
-  reader.onerror = ()=>{ document.getElementById("errorMsg").textContent="Could not read this file."; document.getElementById("errorMsg").style.display="block"; };
-  reader.readAsArrayBuffer(file);
-});
+  readerAB.onerror = () => readFileBinaryFallback(file);
+  try{
+    readerAB.readAsArrayBuffer(file);
+  }catch(err){
+    readFileBinaryFallback(file);
+  }
+}
+
+function readFileBinaryFallback(file){
+  const readerBin = new FileReader();
+  readerBin.onload = ev => {
+    try{
+      const wb = XLSX.read(ev.target.result, {type:"binary", cellDates:true});
+      finishParse(wb, file);
+    }catch(err2){
+      showFileError(err2.message || "Could not read this file on this device/browser. Try a different browser (e.g. Chrome) or a laptop.");
+    }
+  };
+  readerBin.onerror = () => showFileError("Could not read this file on this device/browser. Try a different browser (e.g. Chrome) or a laptop.");
+  readerBin.readAsBinaryString(file);
+}
+
+function showFileError(msg){
+  document.getElementById("errorMsg").textContent = msg;
+  document.getElementById("errorMsg").style.display="block";
+}
+
+function finishParse(wb, file){
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
+  const dataRows = aoa.slice(2);
+  const parsed = [];
+  let minD=null, maxD=null;
+  for(const r of dataRows){
+    const instructor = r[COL.instructor];
+    const rawDate = r[COL.date];
+    if(!instructor || !rawDate) continue;
+    const d = toDateOnly(rawDate);
+    if(!d) continue;
+    if(!minD || d<minD) minD=d;
+    if(!maxD || d>maxD) maxD=d;
+    parsed.push({date:d, course:r[COL.course], instructor:String(instructor).trim(), rating:toNumericRating(r[COL.rating])});
+  }
+  if(parsed.length===0){ showFileError("No usable rows found. Check this is the raw feedback export."); return; }
+  rawRows = parsed; fileRange = {min:minD, max:maxD};
+  document.getElementById("errorMsg").style.display="none";
+  document.getElementById("uploadPanel").innerHTML = `
+    <div class="file-row">
+      <div>
+        <div class="name">📄 ${file.name}</div>
+        <div class="meta">${parsed.length.toLocaleString()} rows &middot; data spans ${fmt(minD)} to ${fmt(maxD)}</div>
+      </div>
+      <button class="reset" onclick="location.reload()">Choose a different file</button>
+    </div>`;
+  document.getElementById("controlsPanel").style.display="block";
+  ["startDate","endDate"].forEach(id=>{
+    document.getElementById(id).min = fmt(minD);
+    document.getElementById(id).max = fmt(maxD);
+  });
+  document.getElementById("startDate").value = fmt(minD);
+  document.getElementById("endDate").value = fmt(maxD);
+  compute();
+}
 
 document.getElementById("startDate").addEventListener("change", compute);
 document.getElementById("endDate").addEventListener("change", compute);
