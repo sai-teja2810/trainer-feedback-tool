@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Trainer Feedback Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#0B1220; --panel:#121B2E; --border:#223049;
+    --accent:#22D3EE; --amber:#F5A623; --green:#34D399; --red:#F87171;
+    --text:#E7ECF5; --muted:#8291A8;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:Inter,system-ui,-apple-system,sans-serif; padding:28px 18px;}
+  .wrap{max-width:1180px; margin:0 auto;}
+  h1{font-family:'Courier New',monospace; font-size:21px; margin:0 0 4px; display:flex; align-items:center; gap:10px;}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 22px;}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:18px;}
+  .drop{border:2px dashed var(--border); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer;}
+  .drop:hover{border-color:var(--accent);}
+  .drop input{display:none;}
+  .drop .hint{font-size:12px; color:var(--muted); margin-top:6px;}
+  .file-row{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;}
+  .file-row .name{font-weight:600; font-size:14px;}
+  .file-row .meta{font-size:12px; color:var(--muted); margin-top:2px;}
+  .reset{background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline;}
+  .controls{display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;}
+  .field label{display:block; font-size:12px; color:var(--muted); margin-bottom:4px;}
+  .field input[type=date], .field input[type=text]{
+    background:var(--bg); border:1px solid var(--border); color:var(--text);
+    border-radius:6px; padding:8px 10px; font-size:13px;
+  }
+  button.primary{margin-left:auto; background:var(--accent); color:#04222B; border:none; padding:10px 16px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer;}
+  button.primary:hover{filter:brightness(1.1);}
+  .stats{display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin-bottom:18px;}
+  .stat{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:11px;}
+  .stat .l{font-size:10.5px; color:var(--muted); margin-bottom:4px;}
+  .stat .v{font-family:'Courier New',monospace; font-size:16px; font-weight:700;}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th{text-align:left; color:var(--muted); font-weight:500; border-bottom:1px solid var(--border); padding:8px 6px; cursor:pointer; user-select:none; white-space:nowrap;}
+  th:hover{color:var(--text);}
+  th .arrow{font-size:10px; margin-left:3px; opacity:.7;}
+  td{padding:6px; border-bottom:1px solid var(--border);}
+  .num{text-align:right;}
+  h2{font-family:'Courier New',monospace; font-size:14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;}
+  h2 .tag{font-size:11px; color:var(--muted); font-weight:normal;}
+  .error{color:var(--amber); font-size:13px; margin-top:12px;}
+  .empty{color:var(--muted); text-align:center; padding:20px; font-size:13px;}
+  svg text{fill:var(--muted); font-size:11px; font-family:Inter,sans-serif;}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  .searchbar{display:flex; justify-content:flex-end; margin-bottom:10px;}
+  .searchbar input{width:200px;}
+  @media(max-width:900px){ .grid2{grid-template-columns:1fr;} .stats{grid-template-columns:repeat(3,1fr);} }
+  @media(max-width:520px){ .stats{grid-template-columns:repeat(2,1fr);} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛡️ Trainer Feedback Dashboard</h1>
+  <p class="sub">Upload the raw export, set a date window, and get the full picture — trainer performance, rating spread, monthly trend, and course breakdown.</p>
+
+  <div class="panel" id="uploadPanel">
+    <label class="drop" id="dropLabel">
+      <div>Click to choose your feedback export (.xlsx)</div>
+      <div class="hint">Nothing leaves your computer — parsed locally in the browser</div>
+      <input type="file" id="fileInput" accept=".xlsx,.xls" />
+    </label>
+    <div class="error" id="errorMsg" style="display:none;"></div>
+  </div>
+
+  <div class="panel" id="controlsPanel" style="display:none;">
+    <div class="controls">
+      <div class="field"><label>From</label><input type="date" id="startDate" /></div>
+      <div class="field"><label>To</label><input type="date" id="endDate" /></div>
+      <button class="primary" id="downloadBtn">⬇ Download report (.xlsx)</button>
+    </div>
+  </div>
+
+  <div id="statsPanel"></div>
+
+  <div class="panel" id="allPanel" style="display:none;">
+    <h2>All Trainers <span class="tag">click a column to sort</span></h2>
+    <div class="searchbar"><input type="text" id="searchBox" placeholder="Search trainer name..." /></div>
+    <div style="overflow-x:auto;"><table id="allTable"></table></div>
+  </div>
+
+  <div class="panel" id="topPanel" style="display:none;">
+    <h2>Trainers of more than 4.5 ratings</h2>
+    <div id="chartHolder"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel" id="distPanel" style="display:none;">
+      <h2>Rating Distribution</h2>
+      <div id="distChartHolder"></div>
+    </div>
+    <div class="panel" id="watchPanel" style="display:none;">
+      <h2>Below 4.0 <span class="tag">may need a follow-up</span></h2>
+      <div style="overflow-x:auto;"><table id="watchTable"></table></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel" id="trendPanel" style="display:none;">
+      <h2>Monthly Feedback Volume</h2>
+      <div id="trendChartHolder"></div>
+    </div>
+    <div class="panel" id="coursePanel" style="display:none;">
+      <h2>Course-wise Performance</h2>
+      <div style="overflow-x:auto;"><table id="courseTable"></table></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const RATING_MAP = {good:5, "very fair":4, fair:3, poor:2, "very poor":1};
+const COL = {date:2, course:9, instructor:12, rating:14};
+let rawRows = null, fileRange = null, currentResults = null;
+let sortState = {key:"instructor", dir:1};
+let searchTerm = "";
+
+function toDateOnly(v){
+  if (v instanceof Date && !isNaN(v)) return new Date(v.getFullYear(), v.getMonth(), v.getDate());
+  if (typeof v === "number"){ try{ const p = XLSX.SSF.parse_date_code(v); if(p) return new Date(p.y, p.m-1, p.d); }catch(e){} }
+  if (typeof v === "string"){ const d = new Date(v); if(!isNaN(d)) return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+  return null;
+}
+function toNumericRating(v){
+  if (v===null||v===undefined||v==="") return null;
+  if (typeof v === "number") return v;
+  const key = String(v).trim().toLowerCase();
+  return key in RATING_MAP ? RATING_MAP[key] : null;
+}
+function fmt(d){ return d.toISOString().slice(0,10); }
+function monthLabel(d){ return d.toLocaleString('en-US',{month:'short', year:'numeric'}); }
+function monthKey(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+
+document.getElementById("fileInput").addEventListener("change", e=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try{
+      const wb = XLSX.read(ev.target.result, {type:"array", cellDates:true});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
+      const dataRows = aoa.slice(2);
+      const parsed = [];
+      let minD=null, maxD=null;
+      for(const r of dataRows){
+        const instructor = r[COL.instructor];
+        const rawDate = r[COL.date];
+        if(!instructor || !rawDate) continue;
+        const d = toDateOnly(rawDate);
+        if(!d) continue;
+        if(!minD || d<minD) minD=d;
+        if(!maxD || d>maxD) maxD=d;
+        parsed.push({date:d, course:r[COL.course], instructor:String(instructor).trim(), rating:toNumericRating(r[COL.rating])});
+      }
+      if(parsed.length===0) throw new Error("No usable rows found. Check this is the raw feedback export.");
+      rawRows = parsed; fileRange = {min:minD, max:maxD};
+      document.getElementById("errorMsg").style.display="none";
+      document.getElementById("uploadPanel").innerHTML = `
+        <div class="file-row">
+          <div>
+            <div class="name">📄 ${file.name}</div>
+            <div class="meta">${parsed.length.toLocaleString()} rows &middot; data spans ${fmt(minD)} to ${fmt(maxD)}</div>
+          </div>
+          <button class="reset" onclick="location.reload()">Choose a different file</button>
+        </div>`;
+      document.getElementById("controlsPanel").style.display="block";
+      ["startDate","endDate"].forEach(id=>{
+        document.getElementById(id).min = fmt(minD);
+        document.getElementById(id).max = fmt(maxD);
+      });
+      document.getElementById("startDate").value = fmt(minD);
+      document.getElementById("endDate").value = fmt(maxD);
+      compute();
+    }catch(err){
+      document.getElementById("errorMsg").textContent = err.message || "Could not read this file.";
+      document.getElementById("errorMsg").style.display="block";
+    }
+  };
+  reader.onerror = ()=>{ document.getElementById("errorMsg").textContent="Could not read this file."; document.getElementById("errorMsg").style.display="block"; };
+  reader.readAsArrayBuffer(file);
+});
+
+document.getElementById("startDate").addEventListener("change", compute);
+document.getElementById("endDate").addEventListener("change", compute);
+document.getElementById("downloadBtn").addEventListener("click", downloadReport);
+document.getElementById("searchBox").addEventListener("input", e=>{ searchTerm = e.target.value.toLowerCase(); renderAllTable(); });
+
+function compute(){
+  if(!rawRows) return;
+  const s = new Date(document.getElementById("startDate").value);
+  const e = new Date(document.getElementById("endDate").value);
+
+  const byInstr = {};
+  const ratingDist = {1:0,2:0,3:0,4:0,5:0};
+  const byMonth = {};
+  const byCourse = {};
+
+  for(const r of rawRows){
+    if(r.date < s || r.date > e) continue;
+    if(r.rating === null) continue;
+
+    const rec = byInstr[r.instructor] || (byInstr[r.instructor] = {ratings:[], courses:new Set()});
+    rec.ratings.push(r.rating);
+    if(r.course) rec.courses.add(r.course);
+
+    const rounded = Math.round(r.rating);
+    if(ratingDist[rounded] !== undefined) ratingDist[rounded]++;
+
+    const mk = monthKey(r.date);
+    const mrec = byMonth[mk] || (byMonth[mk] = {label: monthLabel(r.date), count:0, sortKey:mk});
+    mrec.count++;
+
+    if(r.course){
+      const crec = byCourse[r.course] || (byCourse[r.course] = {ratings:[], instructors:new Set()});
+      crec.ratings.push(r.rating);
+      crec.instructors.add(r.instructor);
+    }
+  }
+
+  const all = Object.entries(byInstr).map(([instructor,s])=>({
+    instructor,
+    average: Math.round((s.ratings.reduce((a,b)=>a+b,0)/s.ratings.length)*100)/100,
+    batches: s.courses.size,
+    feedbacks: s.ratings.length,
+  }));
+  const top = all.filter(r=>r.average>=4.5).sort((a,b)=>b.feedbacks-a.feedbacks);
+  const watch = all.filter(r=>r.average<4.0).sort((a,b)=>a.average-b.average);
+
+  const monthly = Object.values(byMonth).sort((a,b)=>a.sortKey.localeCompare(b.sortKey));
+
+  const courses = Object.entries(byCourse).map(([course,c])=>({
+    course,
+    average: Math.round((c.ratings.reduce((a,b)=>a+b,0)/c.ratings.length)*100)/100,
+    feedbacks: c.ratings.length,
+    trainers: c.instructors.size,
+  })).sort((a,b)=>b.average-a.average);
+
+  currentResults = {all, top, watch, ratingDist, monthly, courses};
+  renderAll();
+}
+
+function renderAll(){
+  renderKPIs(); renderAllTable(); renderTopChart(); renderDist(); renderWatch(); renderTrend(); renderCourses();
+}
+
+function renderKPIs(){
+  const {all, top, watch} = currentResults;
+  const totalFeedbacks = all.reduce((a,r)=>a+r.feedbacks,0);
+  const overallAvg = all.length ? Math.round((all.reduce((a,r)=>a+r.average*r.feedbacks,0)/totalFeedbacks)*100)/100 : 0;
+  document.getElementById("statsPanel").innerHTML = `
+    <div class="stats">
+      <div class="stat"><div class="l">Trainers in range</div><div class="v">${all.length}</div></div>
+      <div class="stat"><div class="l">Rated ≥ 4.5</div><div class="v" style="color:var(--green)">${top.length}</div></div>
+      <div class="stat"><div class="l">Below 4.0</div><div class="v" style="color:${watch.length?'var(--red)':'var(--text)'}">${watch.length}</div></div>
+      <div class="stat"><div class="l">Weighted avg</div><div class="v">${overallAvg.toFixed(2)}</div></div>
+      <div class="stat"><div class="l">Total feedbacks</div><div class="v">${totalFeedbacks}</div></div>
+      <div class="stat"><div class="l">Window</div><div class="v" style="font-size:12px;">${document.getElementById("startDate").value.slice(5)} → ${document.getElementById("endDate").value.slice(5)}</div></div>
+    </div>`;
+}
+
+function sortIcon(key){ return sortState.key===key ? (sortState.dir===1?'▲':'▼') : ''; }
+
+function renderAllTable(){
+  document.getElementById("allPanel").style.display="block";
+  let rows = currentResults.all.filter(r=>r.instructor.toLowerCase().includes(searchTerm));
+  rows.sort((a,b)=>{
+    const k = sortState.key;
+    if(typeof a[k]==="string") return a[k].localeCompare(b[k]) * sortState.dir;
+    return (a[k]-b[k]) * sortState.dir;
+  });
+  const rowsHtml = rows.map((r,i)=>`
+    <tr>
+      <td style="color:var(--muted)">${i+1}</td>
+      <td>${r.instructor}</td>
+      <td class="num" style="color:${r.average>=4.5?'var(--green)':(r.average<4.0?'var(--red)':'var(--text)')}">${r.average.toFixed(2)}</td>
+      <td class="num">${r.batches}</td>
+      <td class="num">${r.feedbacks}</td>
+    </tr>`).join("");
+  document.getElementById("allTable").innerHTML = `
+    <thead><tr>
+      <th>S.No</th>
+      <th data-key="instructor">Instructor <span class="arrow">${sortIcon('instructor')}</span></th>
+      <th class="num" data-key="average">Average <span class="arrow">${sortIcon('average')}</span></th>
+      <th class="num" data-key="batches">Batches <span class="arrow">${sortIcon('batches')}</span></th>
+      <th class="num" data-key="feedbacks">Feedbacks <span class="arrow">${sortIcon('feedbacks')}</span></th>
+    </tr></thead>
+    <tbody>${rowsHtml || '<tr><td colspan="5" class="empty">No matches.</td></tr>'}</tbody>`;
+  document.querySelectorAll('#allTable th[data-key]').forEach(th=>{
+    th.onclick = ()=>{
+      const key = th.getAttribute('data-key');
+      if(sortState.key===key) sortState.dir *= -1; else { sortState.key = key; sortState.dir = 1; }
+      renderAllTable();
+    };
+  });
+}
+
+function renderTopChart(){
+  document.getElementById("topPanel").style.display="block";
+  const top = currentResults.top;
+  document.getElementById("chartHolder").innerHTML = top.length===0
+    ? `<div class="empty">No trainers cleared 4.5 in this window.</div>`
+    : barChart(top.map(r=>({label:r.instructor, value:r.average})), 4, 5.1, "#22D3EE", v=>v.toFixed(2));
+}
+
+function renderDist(){
+  document.getElementById("distPanel").style.display="block";
+  const d = currentResults.ratingDist;
+  const data = [1,2,3,4,5].map(k=>({label:String(k), value:d[k]}));
+  const maxV = Math.max(1, ...data.map(x=>x.value));
+  document.getElementById("distChartHolder").innerHTML = barChart(data, 0, maxV*1.15, "#F5A623", v=>String(v), false);
+}
+
+function renderWatch(){
+  document.getElementById("watchPanel").style.display="block";
+  const watch = currentResults.watch;
+  const rowsHtml = watch.map(r=>`
+    <tr><td>${r.instructor}</td><td class="num" style="color:var(--red)">${r.average.toFixed(2)}</td><td class="num">${r.feedbacks}</td></tr>
+  `).join("");
+  document.getElementById("watchTable").innerHTML = `
+    <thead><tr><th>Instructor</th><th class="num">Average</th><th class="num">Feedbacks</th></tr></thead>
+    <tbody>${rowsHtml || '<tr><td colspan="3" class="empty">Nobody below 4.0 in this window 🎉</td></tr>'}</tbody>`;
+}
+
+function renderTrend(){
+  document.getElementById("trendPanel").style.display="block";
+  const monthly = currentResults.monthly;
+  const maxV = Math.max(1, ...monthly.map(m=>m.count));
+  document.getElementById("trendChartHolder").innerHTML = monthly.length===0
+    ? `<div class="empty">No data in this window.</div>`
+    : barChart(monthly.map(m=>({label:m.label, value:m.count})), 0, maxV*1.15, "#34D399", v=>String(v), false);
+}
+
+function renderCourses(){
+  document.getElementById("coursePanel").style.display="block";
+  const rowsHtml = currentResults.courses.map(c=>`
+    <tr>
+      <td>${c.course}</td>
+      <td class="num" style="color:${c.average>=4.5?'var(--green)':(c.average<4.0?'var(--red)':'var(--text)')}">${c.average.toFixed(2)}</td>
+      <td class="num">${c.trainers}</td>
+      <td class="num">${c.feedbacks}</td>
+    </tr>`).join("");
+  document.getElementById("courseTable").innerHTML = `
+    <thead><tr><th>Course</th><th class="num">Average</th><th class="num">Trainers</th><th class="num">Feedbacks</th></tr></thead>
+    <tbody>${rowsHtml || '<tr><td colspan="4" class="empty">No data.</td></tr>'}</tbody>`;
+}
+
+// Generic small bar chart renderer. rotateLabels=true angles x labels (for long names).
+function barChart(items, yMin, yMax, color, labelFmt, rotateLabels=true){
+  const width = Math.max(560, items.length*(rotateLabels?90:70));
+  const height = 300;
+  const padL=40, padB=rotateLabels?86:40, padT=20, padR=10;
+  const chartW = width - padL - padR;
+  const chartH = height - padT - padB;
+  const barW = chartW/items.length * 0.55;
+  const gap = chartW/items.length;
+
+  let gridLines = "";
+  const steps = 5;
+  for(let i=0;i<=steps;i++){
+    const val = yMin + (yMax-yMin)*i/steps;
+    const y = padT + chartH - (i/steps)*chartH;
+    gridLines += `<line x1="${padL}" y1="${y}" x2="${width-padR}" y2="${y}" stroke="#223049" stroke-dasharray="3,3"/>`;
+    gridLines += `<text x="${padL-8}" y="${y+4}" text-anchor="end">${val.toFixed(yMax<=6?1:0)}</text>`;
+  }
+  let bars="", labels="";
+  items.forEach((it,i)=>{
+    const x = padL + i*gap + (gap-barW)/2;
+    const barH = ((it.value-yMin)/(yMax-yMin))*chartH;
+    const y = padT + chartH - barH;
+    bars += `<rect x="${x}" y="${y}" width="${barW}" height="${Math.max(0,barH)}" fill="${color}" rx="3"/>`;
+    labels += `<text x="${x+barW/2}" y="${y-6}" text-anchor="middle" fill="#E7ECF5">${labelFmt(it.value)}</text>`;
+    if(rotateLabels){
+      labels += `<text x="${x+barW/2}" y="${padT+chartH+16}" text-anchor="end" transform="rotate(-30 ${x+barW/2} ${padT+chartH+16})">${it.label}</text>`;
+    } else {
+      labels += `<text x="${x+barW/2}" y="${padT+chartH+18}" text-anchor="middle">${it.label}</text>`;
+    }
+  });
+  return `<div style="overflow-x:auto;"><svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${gridLines}${bars}${labels}</svg></div>`;
+}
+
+function downloadReport(){
+  if(!currentResults) return;
+  const s = document.getElementById("startDate").value;
+  const e = document.getElementById("endDate").value;
+  const wb = XLSX.utils.book_new();
+
+  const allAoa = [
+    [`Trainer Feedback Report: ${s} to ${e}`], [],
+    ["S.No","Select the Instructor Name","Average","Batches","No. of Feedbacks"],
+    ...currentResults.all.slice().sort((a,b)=>a.instructor.localeCompare(b.instructor)).map((r,i)=>[i+1, r.instructor, r.average, r.batches, r.feedbacks])
+  ];
+  const ws1 = XLSX.utils.aoa_to_sheet(allAoa);
+  ws1["!cols"] = [{wch:6},{wch:26},{wch:10},{wch:10},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, ws1, "All Trainers");
+
+  const topAoa = [
+    ["TRAINERS OF MORE THAN 4.5 RATINGS"], [],
+    ["Select the Instructor Name","Average","Batches","No. of Feedbacks"],
+    ...currentResults.top.map(r=>[r.instructor, r.average, r.batches, r.feedbacks])
+  ];
+  const ws2 = XLSX.utils.aoa_to_sheet(topAoa);
+  ws2["!cols"] = [{wch:26},{wch:10},{wch:10},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, ws2, "Trainers 4.5+");
+
+  const courseAoa = [
+    ["COURSE-WISE PERFORMANCE"], [],
+    ["Course","Average","Trainers","No. of Feedbacks"],
+    ...currentResults.courses.map(c=>[c.course, c.average, c.trainers, c.feedbacks])
+  ];
+  const ws3 = XLSX.utils.aoa_to_sheet(courseAoa);
+  ws3["!cols"] = [{wch:24},{wch:10},{wch:10},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, ws3, "By Course");
+
+  const monthAoa = [
+    ["MONTHLY FEEDBACK VOLUME"], [],
+    ["Month","No. of Feedbacks"],
+    ...currentResults.monthly.map(m=>[m.label, m.count])
+  ];
+  const ws4 = XLSX.utils.aoa_to_sheet(monthAoa);
+  ws4["!cols"] = [{wch:16},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, ws4, "Monthly Trend");
+
+  XLSX.writeFile(wb, `Trainer_Feedback_Dashboard_${s}_to_${e}.xlsx`);
+}
+</script>
+</body>
+</html>
